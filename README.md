@@ -12,6 +12,6 @@ for (int i = 0; i < NUM_THREADS; i++) {
 
 ## To Compile
 ```
-clang++ -std=c++1y -lssl -lcrypto -lpthread main.cpp
+clang++ -O2 -std=c++1y -lssl -lcrypto -lpthread main.cpp
 ./a.out
 ```
