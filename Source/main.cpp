@@ -195,7 +195,7 @@ int main(int argc, char *argv[])
     EC_GROUP_get_order(g_CurveGroup, g_CurveOrder, Ctx);
 
     for (int i = 0; i < 1; i++) {
-        workers.push_back(std::thread(findkey, "rob"));
+        workers.emplace_back(findkey, "rob");
     }
 
     for( auto &t : workers ) {
