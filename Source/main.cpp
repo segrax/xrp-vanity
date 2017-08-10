@@ -12,6 +12,7 @@
 #include "stdafx.hpp"
 
 #include <stdio.h>
+#include <cstring>
 
 #ifdef _MSC_VER
 FILE _iob[] = { *stdin, *stdout, *stderr };
