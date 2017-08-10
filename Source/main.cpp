@@ -87,6 +87,7 @@ void writeBE(uint8_t *pBuffer, std::uint32_t pValue) {
 
 void findkey( const std::string pFindPrefix = "r" ) {
     std::array<std::uint8_t, 64> WorkBuffer;
+    std::array<std::uint8_t, 64> WorkBufferPub;
     std::array<std::uint8_t, 21> SeedBuffer = { 0 };
 
     BN_CTX* Ctx = BN_CTX_new();
@@ -141,14 +142,14 @@ void findkey( const std::string pFindPrefix = "r" ) {
         // generatePublicDeterministicKey
         {
             BIGNUM* bnHash = BN_new();
-
+            
             writeBE(&WorkBuffer[33], 0);
             do
             {
                 writeBE(&WorkBuffer[37], subSeq++);
 
-                SHA512(&WorkBuffer[0], 41, &WorkBuffer[0]);
-                BN_bin2bn(&WorkBuffer[0], 32, bnHash);
+                SHA512(&WorkBuffer[0], 41, &WorkBufferPub[0]);
+                BN_bin2bn(&WorkBufferPub[0], 32, bnHash);
 
             } while (BN_is_zero(bnHash) || BN_cmp(bnHash, g_CurveOrder) >= 0);
 
