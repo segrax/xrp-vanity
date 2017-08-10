@@ -47,7 +47,7 @@ std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size
     SHA256(hash1, sizeof(hash1), hash1);
 
     // Write Check code
-    memcpy((void*)&token[size], hash1, 4);
+    std::memcpy((void*)&token[size], hash1, 4);
 
     bn = BN_new();
     bndiv = BN_new();
@@ -198,9 +198,8 @@ int main(int argc, char *argv[])
         workers.push_back(std::thread(findkey, "rob"));
     }
 
-    std::for_each(workers.begin(), workers.end(), [](std::thread &t)
-    {
+    for( auto &t : workers ) {
         t.join();
-    });
+    };
     return 1;
 }
