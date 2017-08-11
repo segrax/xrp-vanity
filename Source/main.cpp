@@ -19,6 +19,9 @@ FILE _iob[] = { *stdin, *stdout, *stderr };
 extern "C" FILE * __cdecl __iob_func(void) {
     return _iob;
 }
+#else
+#include <unistd.h>
+#define Sleep(x) sleep(x / 1000);
 #endif
 
 const unsigned int TOKEN_ACCOUNT_ID = 0;
@@ -29,26 +32,28 @@ EC_GROUP const* g_CurveGroup = EC_GROUP_new_by_curve_name(NID_secp256k1);
 BIGNUM*         g_CurveOrder = BN_new();
 
 BIGNUM  g_Base;
+std::mutex  g_Lock;
+std::atomic<std::uint64_t> g_Count;
 
 std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size, BN_CTX* pCtx) {
-    unsigned char hash1[32];
+    std::array<std::uint8_t, 32> Hash;
+    std::array<std::uint8_t, 40> Address;
+
     int zpfx, d;
     BIGNUM bnrem;
     BIGNUM *bn, *bndiv, *bnptmp;
     size_t p;
-
-    std::array<std::uint8_t, 40>    Address;
 
     BN_init(&bnrem);
 
     token[0] = type;
 
     // Hash the hash
-    SHA256(token, size, hash1);
-    SHA256(hash1, sizeof(hash1), hash1);
+    SHA256(token, size, &Hash[0]);
+    SHA256(&Hash[0], Hash.size(), &Hash[0]);
 
     // Write Check code
-    std::memcpy((void*)&token[size], hash1, 4);
+    std::memcpy(&token[size], &Hash[0], 4);
 
     bn = BN_new();
     bndiv = BN_new();
@@ -57,8 +62,8 @@ std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size
 
     /* Compute the complete encoded address */
     for (zpfx = 0; zpfx < size + 4 && token[zpfx] == 0; zpfx++);
-    p = Address.size() - 1;
-    Address[p] = '\0';
+
+    p = Address.size();
     while (!BN_is_zero(bn)) {
         BN_div(bndiv, &bnrem, bn, &g_Base, pCtx);
         bnptmp = bn;
@@ -172,6 +177,7 @@ void findkey( const std::string pFindPrefix = "r" ) {
         // Test pattern
         auto account = baseEncode(TOKEN_ACCOUNT_ID, &WorkBuffer[0], 21, Ctx);
         if (account.compare(0, pFindPrefix.length(), pFindPrefix) == 0) {
+            std::lock_guard<std::mutex> lock(g_Lock);
 
             auto t = std::time(nullptr);
             auto tm = *std::localtime(&t);
@@ -180,6 +186,7 @@ void findkey( const std::string pFindPrefix = "r" ) {
             std::cout << account << " => " << baseEncode(TOKEN_FAMILY_SEED, &SeedBuffer[0], 17, Ctx) << "\n";
         }
 
+        ++g_Count;
     } while (1);
 
     BN_free(bnPrivateKey);
@@ -187,20 +194,33 @@ void findkey( const std::string pFindPrefix = "r" ) {
     EC_POINT_free(ptPublic);
 }
 
-int main(int argc, char *argv[])
-{
+int main(int pArgc, char *pArgv[]) {
+
     std::vector<std::thread> workers;
     BN_CTX*         Ctx = BN_CTX_new();
 
     BN_set_word(&g_Base, 58);
     EC_GROUP_get_order(g_CurveGroup, g_CurveOrder, Ctx);
 
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < 8; i++) {
         workers.emplace_back(findkey, "rob");
     }
 
-    for( auto &t : workers ) {
-        t.join();
+    for( ;; ) {
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        Sleep(1000);
+
+        {
+            std::lock_guard<std::mutex> lock(g_Lock);
+
+            auto current_time = std::chrono::high_resolution_clock::now();
+            auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+
+            std::cout << "[" << g_Count / elapsed_seconds << "/s]\r";
+            g_Count = 0;
+        }
     };
+
     return 1;
 }

@@ -48,7 +48,6 @@ void prepKernel() {
         std::cout << buffer << std::endl;
     }
 
-
     precomp_kernel = clCreateKernel(program, "secp256k1_ecmult_table_precomp_gej", &ret);
     mult_kernel = clCreateKernel(program, "secp256k1_ecmult", &ret);
 }
