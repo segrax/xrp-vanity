@@ -219,7 +219,7 @@ int main(int pArgc, char *pArgv[]) {
             auto current_time = std::chrono::high_resolution_clock::now();
             auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
 
-            std::cout << "[" << g_Count / elapsed_seconds << "/s]\r";
+            std::cout << "[" << g_Count / elapsed_seconds << "/s]\r" << std::flush;
             g_Count = 0;
         }
     };
