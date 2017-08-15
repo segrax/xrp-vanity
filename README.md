@@ -1,17 +1,19 @@
 # xrp-vanity
 
-## To use
-
-Edit these lines in main.cpp. 'NUM_THREADS' and "rPrefix"
-
-```
-for (int i = 0; i < NUM_THREADS; i++) { 
-    workers.emplace_back(findkey, "rPrefix"));
-}
-```
-
 ## To Compile
 ```
 clang++ -O2 -std=c++1y -lssl -lcrypto -lpthread main.cpp
 ./a.out
+```
+
+## To use
+
+To start with 4 threads, searching for prefix rXRP
+```
+./a.out 4 XRP
+xrp-vanity
+Searching Prefix: rXRP - Threads: 4
+
+[2017-08-16 09:14:59] rXRPST9qbGics7DcAEFku4X3EqZYYhPAk => snz9xnr8SvBbCABoTjupDAa2zWCeF 
+[18450/s]
 ```
