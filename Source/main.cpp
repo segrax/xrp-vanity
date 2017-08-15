@@ -204,9 +204,25 @@ int main(int pArgc, char *pArgv[]) {
     EC_GROUP_get_order(g_CurveGroup, g_CurveOrder, Ctx);
     EC_GROUP_precompute_mult(g_CurveGroup, Ctx);
 
-    for (int i = 0; i < 8; i++) {
-        workers.emplace_back(findkey, "rob");
+    if(pArgc != 3) {
+        std::cout << "usage:   '" << pArgv[0] << " <Threads> <Prefix>'\n";
+        std::cout << "\n" << pArgv[0] << " 4 rRob\n\n";
+        exit(1);
     }
+
+    std::string pattern(pArgv[2]);
+    int Threads = atoi(pArgv[1]);
+
+    if(pattern[0] != 'r')
+        pattern.insert(pattern.begin(), 'r');
+
+    std::cout << "xrp-vanity\n";
+    std::cout << "Searching Prefix: " << pattern << " - Threads: " << Threads << "\n\n";
+
+    for (int i = 0; i < Threads; i++) {
+        workers.emplace_back(findkey, pattern);
+    }
+
 
     for( ;; ) {
         auto start_time = std::chrono::high_resolution_clock::now();
