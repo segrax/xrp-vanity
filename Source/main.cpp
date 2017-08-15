@@ -3,11 +3,6 @@
  * (c) https://github.com/samr7/vanitygen
  * (c) Bitcoin
  */
-#include <openssl/pem.h>
-#include <openssl/sha.h>
-#include <openssl/ec.h>
-#include <openssl/ripemd.h>
-#include <openssl/rand.h>
 
 #include "stdafx.hpp"
 
@@ -19,6 +14,7 @@ FILE _iob[] = { *stdin, *stdout, *stderr };
 extern "C" FILE * __cdecl __iob_func(void) {
     return _iob;
 }
+#include <windows.h>
 #else
 #include <unistd.h>
 #define Sleep(x) sleep(x / 1000);
@@ -28,10 +24,11 @@ const unsigned int TOKEN_ACCOUNT_ID = 0;
 const unsigned int TOKEN_FAMILY_SEED = 33;
 const std::string  g_RippleAlphabet = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
 
-EC_GROUP const* g_CurveGroup = EC_GROUP_new_by_curve_name(NID_secp256k1);
+EC_GROUP*       g_CurveGroup = EC_GROUP_new_by_curve_name(NID_secp256k1);
 BIGNUM*         g_CurveOrder = BN_new();
+EC_POINT const* g_CurveGen = EC_GROUP_get0_generator(g_CurveGroup);
 
-BIGNUM  g_Base;
+BIGNUM*  g_Base = BN_new();
 std::mutex  g_Lock;
 std::atomic<std::uint64_t> g_Count;
 
@@ -40,11 +37,10 @@ std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size
     std::array<std::uint8_t, 40> Address;
 
     int zpfx, d;
-    BIGNUM bnrem;
+    BIGNUM *bnrem = BN_new();
     BIGNUM *bn, *bndiv, *bnptmp;
     size_t p;
 
-    BN_init(&bnrem);
 
     token[0] = type;
 
@@ -65,11 +61,11 @@ std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size
 
     p = Address.size();
     while (!BN_is_zero(bn)) {
-        BN_div(bndiv, &bnrem, bn, &g_Base, pCtx);
+        BN_div(bndiv, bnrem, bn, g_Base, pCtx);
         bnptmp = bn;
         bn = bndiv;
         bndiv = bnptmp;
-        d = BN_get_word(&bnrem);
+        d = BN_get_word(bnrem);
         Address[--p] = g_RippleAlphabet[d];
     }
     while (zpfx--) {
@@ -78,7 +74,7 @@ std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size
 
     BN_free(bn);
     BN_free(bndiv);
-    BN_free(&bnrem);
+    BN_free(bnrem);
 
     return std::string(Address.begin() + p, Address.end());
 }
@@ -98,7 +94,7 @@ void findkey( const std::string pFindPrefix = "r" ) {
 
     BN_CTX* Ctx = BN_CTX_new();
 
-    BIGNUM* bnPrivateKey = BN_new();
+    bignum_st* bnPrivateKey = BN_new();
 
     EC_POINT* ptRoot = EC_POINT_new(g_CurveGroup);
     EC_POINT* ptPublic = EC_POINT_new(g_CurveGroup);
@@ -137,6 +133,9 @@ void findkey( const std::string pFindPrefix = "r" ) {
 
         // generateRootDeterministicPublicKey
         {
+            // ptRoot = generator * bnPrivateKey
+            //gpu_Mul(ptRoot, bnPrivateKey, g_CurveGen, Ctx);
+
             EC_POINT_mul(g_CurveGroup, ptRoot, bnPrivateKey, nullptr, nullptr, Ctx);
             EC_POINT_point2oct(g_CurveGroup, ptRoot,
                 POINT_CONVERSION_COMPRESSED,
@@ -159,7 +158,9 @@ void findkey( const std::string pFindPrefix = "r" ) {
 
             } while (BN_is_zero(bnHash) || BN_cmp(bnHash, g_CurveOrder) >= 0);
 
+            //gpu_Mul(ptPublic, bnHash, g_CurveGen, Ctx);
             EC_POINT_mul(g_CurveGroup, ptPublic, bnHash, nullptr, nullptr, Ctx);
+
             EC_POINT_add(g_CurveGroup, ptPublic, ptRoot, ptPublic, Ctx);
             BN_free(bnHash);
 
@@ -199,8 +200,9 @@ int main(int pArgc, char *pArgv[]) {
     std::vector<std::thread> workers;
     BN_CTX*         Ctx = BN_CTX_new();
 
-    BN_set_word(&g_Base, 58);
+    BN_set_word(g_Base, 58);
     EC_GROUP_get_order(g_CurveGroup, g_CurveOrder, Ctx);
+    EC_GROUP_precompute_mult(g_CurveGroup, Ctx);
 
     for (int i = 0; i < 8; i++) {
         workers.emplace_back(findkey, "rob");
