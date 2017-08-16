@@ -87,7 +87,7 @@ void writeBE(uint8_t *pBuffer, std::uint32_t pValue) {
     *pBuffer = (pValue >> 0) & 0xFF;
 }
 
-void findkey( const std::string pFindPrefix = "r" ) {
+void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
     std::array<std::uint8_t, 64> WorkBuffer;
     std::array<std::uint8_t, 64> WorkBufferPub;
     std::array<std::uint8_t, 21> SeedBuffer = { 0 };
@@ -95,20 +95,12 @@ void findkey( const std::string pFindPrefix = "r" ) {
     BN_CTX* Ctx = BN_CTX_new();
 
     bignum_st* bnPrivateKey = BN_new();
+    bignum_st* bnHash = BN_new();
 
     EC_POINT* ptRoot = EC_POINT_new(g_CurveGroup);
     EC_POINT* ptPublic = EC_POINT_new(g_CurveGroup);
 
     std::uint32_t seq, subSeq;
-
-    // Ensure valid prefix pattern
-    for ( auto ch : pFindPrefix) {
-
-        if (g_RippleAlphabet.find(ch, 0) == std::string::npos) {
-            std::cout << "Impossible pattern; Character: '" << ch << "'\n";
-            exit(1);
-        }
-    }
 
     do {
         seq = 0;
@@ -146,8 +138,6 @@ void findkey( const std::string pFindPrefix = "r" ) {
 
         // generatePublicDeterministicKey
         {
-            BIGNUM* bnHash = BN_new();
-            
             writeBE(&WorkBuffer[33], 0);
             do
             {
@@ -162,7 +152,6 @@ void findkey( const std::string pFindPrefix = "r" ) {
             EC_POINT_mul(g_CurveGroup, ptPublic, bnHash, nullptr, nullptr, Ctx);
 
             EC_POINT_add(g_CurveGroup, ptPublic, ptRoot, ptPublic, Ctx);
-            BN_free(bnHash);
 
             EC_POINT_point2oct(g_CurveGroup, ptPublic,
                 POINT_CONVERSION_COMPRESSED,
@@ -182,7 +171,7 @@ void findkey( const std::string pFindPrefix = "r" ) {
 
             auto t = std::time(nullptr);
             auto tm = *std::localtime(&t);
-            std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S] ");
+            std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S]") << " [" << std::to_string(pThreadID) << "]";
 
             std::cout << account << " => " << baseEncode(TOKEN_FAMILY_SEED, &SeedBuffer[0], 17, Ctx) << "\n";
         }
@@ -190,6 +179,7 @@ void findkey( const std::string pFindPrefix = "r" ) {
         ++g_Count;
     } while (1);
 
+    BN_free(bnHash);
     BN_free(bnPrivateKey);
     EC_POINT_free(ptRoot);
     EC_POINT_free(ptPublic);
@@ -210,17 +200,26 @@ int main(int pArgc, char *pArgv[]) {
         exit(1);
     }
 
-    std::string pattern(pArgv[2]);
-    int Threads = atoi(pArgv[1]);
+    std::string PrefixPattern(pArgv[2]);
+    int MaxThreads = atoi(pArgv[1]);
 
-    if(pattern[0] != 'r')
-        pattern.insert(pattern.begin(), 'r');
+    if(PrefixPattern[0] != 'r')
+        PrefixPattern.insert(PrefixPattern.begin(), 'r');
+
+    // Ensure valid prefix pattern
+    for (auto ch : PrefixPattern) {
+
+        if (g_RippleAlphabet.find(ch, 0) == std::string::npos) {
+            std::cout << "Impossible pattern; Character: '" << ch << "'\n";
+            exit(1);
+        }
+    }
 
     std::cout << "xrp-vanity\n";
-    std::cout << "Searching Prefix: " << pattern << " - Threads: " << Threads << "\n\n";
+    std::cout << "Searching Prefix: " << PrefixPattern << " - Threads: " << MaxThreads << "\n\n";
 
-    for (int i = 0; i < Threads; i++) {
-        workers.emplace_back(findkey, pattern);
+    for (int i = 0; i < MaxThreads; i++) {
+        workers.emplace_back(findkey, PrefixPattern, i);
     }
 
 
