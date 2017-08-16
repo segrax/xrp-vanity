@@ -10,14 +10,14 @@
 #include <cstring>
 
 #ifdef _MSC_VER
-FILE _iob[] = { *stdin, *stdout, *stderr };
-extern "C" FILE * __cdecl __iob_func(void) {
-    return _iob;
-}
-#include <windows.h>
+    FILE _iob[] = { *stdin, *stdout, *stderr };
+    extern "C" FILE * __cdecl __iob_func(void) {
+        return _iob;
+    }
+    #include <windows.h>
 #else
-#include <unistd.h>
-#define Sleep(x) sleep(x / 1000);
+    #include <unistd.h>
+    #define Sleep(x) sleep(x / 1000);
 #endif
 
 const unsigned int TOKEN_ACCOUNT_ID = 0;
@@ -33,31 +33,31 @@ std::mutex  g_Lock;
 std::mutex  g_RandLock;
 std::atomic<std::uint64_t> g_Count;
 
-std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size, BN_CTX* pCtx) {
+std::string baseEncode(std::uint8_t pType, unsigned char* pData, std::size_t pDataSize, BN_CTX* pCtx) {
     std::array<std::uint8_t, 32> Hash;
     std::array<std::uint8_t, 40> Address;
 
     int zpfx, d;
-    BIGNUM *bnrem = BN_new();
-    BIGNUM *bn, *bndiv, *bnptmp;
+    BIGNUM *bn, *bndiv, *bnrem, *bnptmp;
     size_t p;
 
-    token[0] = type;
+    pData[0] = pType;
 
     // Hash the hash
-    SHA256(token, size, &Hash[0]);
+    SHA256(pData, pDataSize, &Hash[0]);
     SHA256(&Hash[0], Hash.size(), &Hash[0]);
 
     // Write Check code
-    std::memcpy(&token[size], &Hash[0], 4);
+    std::memcpy(&pData[pDataSize], &Hash[0], 4);
 
     bn = BN_new();
     bndiv = BN_new();
+    bnrem = BN_new();
 
-    BN_bin2bn(token, size + 4, bn);
+    BN_bin2bn(pData, pDataSize + 4, bn);
 
     /* Compute the complete encoded address */
-    for (zpfx = 0; zpfx < size + 4 && token[zpfx] == 0; zpfx++);
+    for (zpfx = 0; zpfx < pDataSize + 4 && pData[zpfx] == 0; zpfx++);
 
     p = Address.size();
     while (!BN_is_zero(bn)) {
@@ -102,7 +102,7 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
 
     std::uint32_t seq, subSeq;
 
-    do {
+    for(;;) {
         seq = 0;
         subSeq = 0;
 
@@ -130,14 +130,9 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
         // generateRootDeterministicPublicKey
         {
             // ptRoot = generator * bnPrivateKey
-            //gpu_Mul(ptRoot, bnPrivateKey, g_CurveGen, Ctx);
-
             EC_POINT_mul(g_CurveGroup, ptRoot, bnPrivateKey, nullptr, nullptr, Ctx);
             EC_POINT_point2oct(g_CurveGroup, ptRoot,
-                POINT_CONVERSION_COMPRESSED,
-                &WorkBuffer[0],
-                33,
-                Ctx);
+                POINT_CONVERSION_COMPRESSED, &WorkBuffer[0], 33, Ctx);
         }
 
         // generatePublicDeterministicKey
@@ -152,16 +147,11 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
 
             } while (BN_is_zero(bnHash) || BN_cmp(bnHash, g_CurveOrder) >= 0);
 
-            //gpu_Mul(ptPublic, bnHash, g_CurveGen, Ctx);
+            // ptPublic = (generator * bnHash) + ptRoot
             EC_POINT_mul(g_CurveGroup, ptPublic, bnHash, nullptr, nullptr, Ctx);
-
             EC_POINT_add(g_CurveGroup, ptPublic, ptRoot, ptPublic, Ctx);
-
-            EC_POINT_point2oct(g_CurveGroup, ptPublic,
-                POINT_CONVERSION_COMPRESSED,
-                &WorkBuffer[0],
-                33,
-                Ctx);
+            EC_POINT_point2oct(g_CurveGroup, ptPublic, 
+                POINT_CONVERSION_COMPRESSED, &WorkBuffer[0], 33, Ctx);
         }
 
         // Account ID
@@ -181,7 +171,7 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
         }
 
         ++g_Count;
-    } while (1);
+    }
 
     BN_free(bnHash);
     BN_free(bnPrivateKey);
@@ -190,11 +180,12 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
 }
 
 int main(int pArgc, char *pArgv[]) {
-
     std::vector<std::thread> workers;
-    BN_CTX*         Ctx = BN_CTX_new();
+    BN_CTX* Ctx = BN_CTX_new();
 
+    // Base 58 Encoding
     BN_set_word(g_Base, 58);
+
     EC_GROUP_get_order(g_CurveGroup, g_CurveOrder, Ctx);
     EC_GROUP_precompute_mult(g_CurveGroup, Ctx);
 
@@ -204,9 +195,11 @@ int main(int pArgc, char *pArgv[]) {
         exit(1);
     }
 
+    // Get Parameters
     std::string PrefixPattern(pArgv[2]);
     int MaxThreads = atoi(pArgv[1]);
 
+    // Ensure prefix starts with 'r'
     if(PrefixPattern[0] != 'r')
         PrefixPattern.insert(PrefixPattern.begin(), 'r');
 
@@ -222,10 +215,14 @@ int main(int pArgc, char *pArgv[]) {
     std::cout << "xrp-vanity\n";
     std::cout << "Searching Prefix: " << PrefixPattern << " - Threads: " << MaxThreads << "\n\n";
 
+    workers.reserve(MaxThreads);
+
+    // Launch Threads
     for (int i = 0; i < MaxThreads; i++) {
         workers.emplace_back(findkey, PrefixPattern, i);
     }
 
+    // Keys per second count
     for( ;; ) {
         auto start_time = std::chrono::high_resolution_clock::now();
 
