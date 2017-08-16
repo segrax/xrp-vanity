@@ -30,6 +30,7 @@ EC_POINT const* g_CurveGen = EC_GROUP_get0_generator(g_CurveGroup);
 
 BIGNUM*  g_Base = BN_new();
 std::mutex  g_Lock;
+std::mutex  g_RandLock;
 std::atomic<std::uint64_t> g_Count;
 
 std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size, BN_CTX* pCtx) {
@@ -40,7 +41,6 @@ std::string baseEncode(std::uint8_t type, unsigned char* token, std::size_t size
     BIGNUM *bnrem = BN_new();
     BIGNUM *bn, *bndiv, *bnptmp;
     size_t p;
-
 
     token[0] = type;
 
@@ -106,10 +106,14 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
         seq = 0;
         subSeq = 0;
 
-        // Get some randoms
-        if (!RAND_bytes(&SeedBuffer[1], 16)) {
-            std::cout << "RAND_bytes failure\n";
-            exit(1);
+        {
+            std::lock_guard<std::mutex> Lock(g_RandLock);
+
+            // Get some randoms
+            if (!RAND_bytes(&SeedBuffer[1], 16)) {
+                std::cout << "RAND_bytes failure\n";
+                exit(1);
+            }
         }
 
         // generateRootDeterministicKey
@@ -171,7 +175,7 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
 
             auto t = std::time(nullptr);
             auto tm = *std::localtime(&t);
-            std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S]") << " [" << std::to_string(pThreadID) << "]";
+            std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S] ");
 
             std::cout << account << " => " << baseEncode(TOKEN_FAMILY_SEED, &SeedBuffer[0], 17, Ctx) << "\n";
         }
@@ -221,7 +225,6 @@ int main(int pArgc, char *pArgv[]) {
     for (int i = 0; i < MaxThreads; i++) {
         workers.emplace_back(findkey, PrefixPattern, i);
     }
-
 
     for( ;; ) {
         auto start_time = std::chrono::high_resolution_clock::now();
