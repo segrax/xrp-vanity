@@ -6,9 +6,6 @@
 
 #include "stdafx.hpp"
 
-#include <stdio.h>
-#include <cstring>
-
 #ifdef _MSC_VER
     FILE _iob[] = { *stdin, *stdout, *stderr };
     extern "C" FILE * __cdecl __iob_func(void) {
@@ -22,289 +19,23 @@
 
 const unsigned int TOKEN_ACCOUNT_ID = 0;
 const unsigned int TOKEN_FAMILY_SEED = 33;
-const std::string  g_RippleAlphabet = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
 
 EC_GROUP*       g_CurveGroup = EC_GROUP_new_by_curve_name(NID_secp256k1);
 BIGNUM*         g_CurveOrder = BN_new();
 EC_POINT const* g_CurveGen = EC_GROUP_get0_generator(g_CurveGroup);
 
 BIGNUM*  g_Base = BN_new();
+BIGNUM*  g_Difficulty = BN_new();
+
+BN_CTX*  g_Ctx = BN_CTX_new();
 std::mutex  g_Lock;
 std::mutex  g_RandLock;
 std::atomic<std::uint64_t> g_Count;
-BIGNUM* g_PrefixRanges[4] = { 0 };
+std::atomic<bool>		   g_FoundKey;
+std::vector<sPrefix*>      g_Prefixes;
+double g_Chance;
 
-signed char b58_reverse_map[256] = {
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, 50, 33, 7, 21, 41, 40, 27, 45, 8, -1, -1, -1, -1, -1, -1,
-    -1, 54, 10, 38, 12, 14, 47, 15, 16, -1, 17, 18, 19, 20, 13, -1,
-    22, 23, 24, 25, 26, 11, 28, 29, 30, 31, 32, -1, -1, -1, -1, -1,
-    -1, 5, 34, 35, 36, 37, 6, 39, 3, 49, 42, 43, -1, 44, 4, 46,
-    1, 48, 0, 2, 51, 52, 53, 9, 55, 56, 57, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-};
-
-/*
-* Find the bignum ranges that produce a given prefix.
-*/
-static int
-get_prefix_ranges(int addrtype, const char *pfx, BIGNUM **result,
-    BN_CTX *bnctx)
-{
-    int i, p, c;
-    int zero_prefix = 0;
-    int check_upper = 0;
-    int b58pow, b58ceil, b58top = 0;
-    int ret = -1;
-
-    BIGNUM *bntarg, *bnceil, *bnfloor;
-    BIGNUM *bnap, *bnbp, *bntp;
-    BIGNUM *bnhigh = NULL, *bnlow = NULL, *bnhigh2 = NULL, *bnlow2 = NULL;
-    BIGNUM *bntmp, *bntmp2;
-
-    bntarg = BN_new();
-    bnceil = BN_new();
-    bnfloor = BN_new();
-    bntmp = BN_new();
-    bntmp2 = BN_new();
-
-    p = strlen(pfx);
-
-    for (i = 0; i < p; i++) {
-        c = b58_reverse_map[(int)pfx[i]];
-        if (c == -1) {
-            fprintf(stderr,
-                "Invalid character '%c' in prefix '%s'\n",
-                pfx[i], pfx);
-            goto out;
-        }
-        if (i == zero_prefix) {
-            if (c == 0) {
-                /* Add another zero prefix */
-                zero_prefix++;
-                if (zero_prefix > 19) {
-                    fprintf(stderr,
-                        "Prefix '%s' is too long\n",
-                        pfx);
-                    goto out;
-                }
-                continue;
-            }
-
-            /* First non-zero character */
-            b58top = c;
-            BN_set_word(bntarg, c);
-
-        }
-        else {
-            BN_set_word(bntmp2, c);
-            BN_mul(bntmp, bntarg, g_Base, bnctx);
-            BN_add(bntarg, bntmp, bntmp2);
-        }
-    }
-
-    /* Power-of-two ceiling and floor values based on leading 1s */
-    BN_clear(bntmp);
-    BN_set_bit(bntmp, 200 - (zero_prefix * 8));
-    BN_sub(bnceil, bntmp, BN_value_one());
-    BN_set_bit(bnfloor, 192 - (zero_prefix * 8));
-
-    bnlow = BN_new();
-    bnhigh = BN_new();
-
-    if (b58top) {
-        /*
-        * If a non-zero was given in the prefix, find the
-        * numeric boundaries of the prefix.
-        */
-
-        BN_copy(bntmp, bnceil);
-        bnap = bntmp;
-        bnbp = bntmp2;
-        b58pow = 0;
-        while (BN_cmp(bnap, g_Base) > 0) {
-            b58pow++;
-            BN_div(bnbp, NULL, bnap, g_Base, bnctx);
-            bntp = bnap;
-            bnap = bnbp;
-            bnbp = bntp;
-        }
-        b58ceil = (int) BN_get_word(bnap);
-
-        if ((b58pow - (p - zero_prefix)) < 6) {
-            /*
-            * Do not allow the prefix to constrain the
-            * check value, this is ridiculous.
-            */
-            fprintf(stderr, "Prefix '%s' is too long\n", pfx);
-            goto out;
-        }
-
-        BN_set_word(bntmp2, b58pow - (p - zero_prefix));
-        BN_exp(bntmp, g_Base, bntmp2, bnctx);
-        BN_mul(bnlow, bntmp, bntarg, bnctx);
-        BN_sub(bntmp2, bntmp, BN_value_one());
-        BN_add(bnhigh, bnlow, bntmp2);
-
-        if (b58top <= b58ceil) {
-            /* Fill out the upper range too */
-            check_upper = 1;
-            bnlow2 = BN_new();
-            bnhigh2 = BN_new();
-
-            BN_mul(bnlow2, bnlow, g_Base, bnctx);
-            BN_mul(bntmp2, bnhigh, g_Base, bnctx);
-            BN_set_word(bntmp, 57);
-            BN_add(bnhigh2, bntmp2, bntmp);
-
-            /*
-            * Addresses above the ceiling will have one
-            * fewer "1" prefix in front than we require.
-            */
-            if (BN_cmp(bnceil, bnlow2) < 0) {
-                /* High prefix is above the ceiling */
-                check_upper = 0;
-                BN_free(bnhigh2);
-                bnhigh2 = NULL;
-                BN_free(bnlow2);
-                bnlow2 = NULL;
-            }
-            else if (BN_cmp(bnceil, bnhigh2) < 0)
-                /* High prefix is partly above the ceiling */
-                BN_copy(bnhigh2, bnceil);
-
-            /*
-            * Addresses below the floor will have another
-            * "1" prefix in front instead of our target.
-            */
-            if (BN_cmp(bnfloor, bnhigh) >= 0) {
-
-                check_upper = 0;
-                BN_free(bnhigh);
-                bnhigh = bnhigh2;
-                bnhigh2 = NULL;
-                BN_free(bnlow);
-                bnlow = bnlow2;
-                bnlow2 = NULL;
-            }
-            else if (BN_cmp(bnfloor, bnlow) > 0) {
-                /* Low prefix is partly below the floor */
-                BN_copy(bnlow, bnfloor);
-            }
-        }
-
-    }
-    else {
-        BN_copy(bnhigh, bnceil);
-        BN_clear(bnlow);
-    }
-
-    /* Limit the prefix to the address type */
-    BN_clear(bntmp);
-    BN_set_word(bntmp, addrtype);
-    BN_lshift(bntmp2, bntmp, 192);
-
-    if (check_upper) {
-        if (BN_cmp(bntmp2, bnhigh2) > 0) {
-            check_upper = 0;
-            BN_free(bnhigh2);
-            bnhigh2 = NULL;
-            BN_free(bnlow2);
-            bnlow2 = NULL;
-        }
-        else if (BN_cmp(bntmp2, bnlow2) > 0)
-            BN_copy(bnlow2, bntmp2);
-    }
-
-    if (BN_cmp(bntmp2, bnhigh) > 0) {
-        if (!check_upper)
-            goto not_possible;
-        check_upper = 0;
-        BN_free(bnhigh);
-        bnhigh = bnhigh2;
-        bnhigh2 = NULL;
-        BN_free(bnlow);
-        bnlow = bnlow2;
-        bnlow2 = NULL;
-    }
-    else if (BN_cmp(bntmp2, bnlow) > 0) {
-        BN_copy(bnlow, bntmp2);
-    }
-
-    BN_set_word(bntmp, addrtype + 1);
-    BN_lshift(bntmp2, bntmp, 192);
-
-    if (check_upper) {
-        if (BN_cmp(bntmp2, bnlow2) < 0) {
-            check_upper = 0;
-            BN_free(bnhigh2);
-            bnhigh2 = NULL;
-            BN_free(bnlow2);
-            bnlow2 = NULL;
-        }
-        else if (BN_cmp(bntmp2, bnhigh2) < 0)
-            BN_copy(bnlow2, bntmp2);
-    }
-
-    if (BN_cmp(bntmp2, bnlow) < 0) {
-        if (!check_upper)
-            goto not_possible;
-        check_upper = 0;
-        BN_free(bnhigh);
-        bnhigh = bnhigh2;
-        bnhigh2 = NULL;
-        BN_free(bnlow);
-        bnlow = bnlow2;
-        bnlow2 = NULL;
-    }
-    else if (BN_cmp(bntmp2, bnhigh) < 0) {
-        BN_copy(bnhigh, bntmp2);
-    }
-
-    /* Address ranges are complete */
-    //assert(check_upper || ((bnlow2 == NULL) && (bnhigh2 == NULL)));
-    result[0] = bnlow;
-    result[1] = bnhigh;
-    result[2] = bnlow2;
-    result[3] = bnhigh2;
-    bnlow = NULL;
-    bnhigh = NULL;
-    bnlow2 = NULL;
-    bnhigh2 = NULL;
-    ret = 0;
-
-    if (0) {
-    not_possible:
-        ret = -2;
-    }
-
-out:
-    BN_free(bntarg);
-    BN_free(bnceil);
-    BN_free(bnfloor);
-    BN_free(bntmp);
-    BN_free(bntmp2);
-
-    if (bnhigh)
-        BN_free(bnhigh);
-    if (bnlow)
-        BN_free(bnlow);
-    if (bnhigh2)
-        BN_free(bnhigh2);
-    if (bnlow2)
-        BN_free(bnlow2);
-
-    return ret;
-}
+const std::string  g_RippleAlphabet = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
 
 std::string baseEncode(std::uint8_t pType, unsigned char* pData, std::size_t pDataSize, BN_CTX* pCtx) {
     std::array<std::uint8_t, 32> Hash;
@@ -360,7 +91,7 @@ void writeBE(uint8_t *pBuffer, std::uint32_t pValue) {
     *pBuffer = (pValue >> 0) & 0xFF;
 }
 
-void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
+void findkey( const size_t pThreadID ) {
     std::array<std::uint8_t, 64> WorkBuffer;
     std::array<std::uint8_t, 64> WorkBufferPub;
     std::array<std::uint8_t, 21> SeedBuffer = { 0 };
@@ -433,28 +164,33 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
         // Account ID
         {
             SHA256(&WorkBuffer[0], 33, &WorkBuffer[0]);
-            RIPEMD160(&WorkBuffer[0], 32, &WorkBuffer[1]);
+			RIPEMD160(&WorkBuffer[0], 32, &WorkBuffer[1]);
 
             WorkBuffer[0] = TOKEN_ACCOUNT_ID;
             BN_bin2bn(&WorkBuffer[0], 25, bnAccountID);
 
-            // Is the accound id within range?
-            if (BN_cmp(g_PrefixRanges[0], bnAccountID) <= 0) {
-                if (BN_cmp(g_PrefixRanges[1], bnAccountID) >= 0) {
+			// Check for prefix matches
+			for (auto& Range : g_Prefixes) {
 
-                    // Full AccountID
-                    auto account = baseEncode(TOKEN_ACCOUNT_ID, &WorkBuffer[0], 21, Ctx);
-                    {
-                        std::lock_guard<std::mutex> lock(g_Lock);
+				// Is the accound id within range?
+				if (BN_cmp(Range->mRange1.mRangeLow, bnAccountID) <= 0) {
+					if (BN_cmp(Range->mRange1.mRangeHigh, bnAccountID) >= 0) {
+						
+						std::lock_guard<std::mutex> lock(g_Lock);
 
-                        auto t = std::time(nullptr);
-                        auto tm = *std::localtime(&t);
-                        std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S] ");
+						// Full AccountID
+						auto account = baseEncode(TOKEN_ACCOUNT_ID, &WorkBuffer[0], 21, Ctx);
 
-                        std::cout << account << " => " << baseEncode(TOKEN_FAMILY_SEED, &SeedBuffer[0], 17, Ctx) << "\n";
-                    }
-                }
-            }
+						auto t = std::time(nullptr);
+						auto tm = *std::localtime(&t);
+
+						std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S] ");
+						std::cout << account << " => " << baseEncode(TOKEN_FAMILY_SEED, &SeedBuffer[0], 17, Ctx) << "\n";
+
+						g_FoundKey = true;
+					}
+				}
+			}
         }
 
         ++g_Count;
@@ -467,67 +203,85 @@ void findkey( const std::string& pFindPrefix, const size_t pThreadID ) {
 }
 
 int main(int pArgc, char *pArgv[]) {
-    std::vector<std::thread> workers;
-    BN_CTX* Ctx = BN_CTX_new();
+	std::vector<std::thread> workers;
+
+	auto start_time = std::chrono::high_resolution_clock::now();
+
+	g_Chance = 0;
 
     // Base 58 Encoding
     BN_set_word(g_Base, 58);
 
-    EC_GROUP_get_order(g_CurveGroup, g_CurveOrder, Ctx);
-    EC_GROUP_precompute_mult(g_CurveGroup, Ctx);
+    EC_GROUP_get_order(g_CurveGroup, g_CurveOrder, g_Ctx);
+    EC_GROUP_precompute_mult(g_CurveGroup, g_Ctx);
 
-    if(pArgc != 3) {
-        std::cout << "usage:   '" << pArgv[0] << " <Threads> <Prefix>'\n";
-        std::cout << "\n" << pArgv[0] << " 4 rRob\n\n";
+    if(pArgc < 3) {
+        std::cout << "usage:   '" << pArgv[0] << " <Threads> <Prefix> <Prefix>...'\n";
+        std::cout << "\n" << pArgv[0] << " 4 rRob<\n\n";
         exit(1);
     }
 
     // Get Parameters
-    std::string PrefixPattern(pArgv[2]);
     int MaxThreads = atoi(pArgv[1]);
 
-    // Ensure prefix starts with 'r'
-    if(PrefixPattern[0] != 'r')
-        PrefixPattern.insert(PrefixPattern.begin(), 'r');
+	// Some messages
+	std::cout << "xrp-vanity\n";
+	std::cout << "Search Threads: " << MaxThreads << "\n\n";
 
-    // Calculate AccountID High/Low Range
-    get_prefix_ranges(0, &PrefixPattern[0], g_PrefixRanges, Ctx);
+	for (int i = 2; i < pArgc; ++i) {
+		std::string PrefixPattern(pArgv[i]);
 
-    // Ensure valid prefix pattern
-    for (auto ch : PrefixPattern) {
+		// Ensure prefix starts with 'r'
+		if (PrefixPattern[0] != 'r')
+			PrefixPattern.insert(PrefixPattern.begin(), 'r');
 
-        if (g_RippleAlphabet.find(ch, 0) == std::string::npos) {
-            std::cout << "Impossible pattern; Character: '" << ch << "'\n";
-            exit(1);
-        }
-    }
+		// Calculate AccountID High/Low Range
+		auto Prefix = get_prefix_ranges(0, &PrefixPattern[0], g_Ctx);
+		if (!Prefix) {
+			return 0;
+		}
 
-    std::cout << "xrp-vanity\n";
-    std::cout << "Searching Prefix: " << PrefixPattern << " - Threads: " << MaxThreads << "\n\n";
+		g_Prefixes.push_back(Prefix);
+	}
 
-    workers.reserve(MaxThreads);
+    calculate_range_difficulty();
 
     // Launch Threads
-    for (int i = 0; i < MaxThreads; i++) {
-        workers.emplace_back(findkey, PrefixPattern, i);
-    }
+	workers.reserve(MaxThreads);
+
+    for (int i = 0; i < MaxThreads; i++)
+        workers.emplace_back(findkey, i);
+
+	std::uint64_t TotalKeys = 0;
+
+	size_t SinceLast = 0;
 
     // Keys per second count
     for( ;; ) {
-        auto start_time = std::chrono::high_resolution_clock::now();
+        auto cycle_start_time = std::chrono::high_resolution_clock::now();
 
         Sleep(1000);
+
+		if (g_FoundKey) {
+			g_FoundKey = false;
+			SinceLast = 0;
+		}
 
         {
             std::lock_guard<std::mutex> lock(g_Lock);
 
             auto current_time = std::chrono::high_resolution_clock::now();
-            auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+            auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(current_time - cycle_start_time).count();
 
-            std::cout << "[" << g_Count / elapsed_seconds << "/s]\r" << std::flush;
-            g_Count = 0;
+            //std::cout << "[" << g_Count / elapsed_seconds << "/s]\r" << std::flush;
+
+			TotalKeys += g_Count;
+			SinceLast += g_Count;
+			vg_output_timing_console(SinceLast, g_Count, TotalKeys);
+			g_Count = 0;
+			
         }
-    };
+    }
 
     return 1;
 }
