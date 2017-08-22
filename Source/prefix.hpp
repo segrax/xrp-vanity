@@ -1,57 +1,57 @@
 
 struct sRange {
-	BIGNUM* mRangeHigh;
-	BIGNUM* mRangeLow;
-	BIGNUM* mDifficulty;
+    BIGNUM* mRangeHigh;
+    BIGNUM* mRangeLow;
+    BIGNUM* mDifficulty;
 
-	sRange() {
-		mRangeHigh = BN_new();
-		mRangeLow = BN_new();
-		mDifficulty = BN_new();
-	}
+    sRange() {
+        mRangeHigh = BN_new();
+        mRangeLow = BN_new();
+        mDifficulty = BN_new();
+    }
 
-	~sRange() {
-		BN_free(mRangeHigh);
-		BN_free(mRangeLow);
-		BN_free(mDifficulty);
-	}
+    ~sRange() {
+        BN_free(mRangeHigh);
+        BN_free(mRangeLow);
+        BN_free(mDifficulty);
+    }
 
-	BIGNUM* Difficulty() {
+    BIGNUM* Difficulty() {
 
-		BN_clear(mDifficulty);
+        BN_clear(mDifficulty);
 
-		if (!isZero())
-			BN_sub(mDifficulty, mRangeHigh, mRangeLow);
+        if (!isZero())
+            BN_sub(mDifficulty, mRangeHigh, mRangeLow);
 
-		return mDifficulty;
-	}
+        return mDifficulty;
+    }
 
-	bool isZero() {
-		return (BN_is_zero(mRangeHigh) && BN_is_zero(mRangeLow));
-	}
+    bool isZero() {
+        return (BN_is_zero(mRangeHigh) && BN_is_zero(mRangeLow));
+    }
 };
 
 struct sPrefix {
-	std::string mPrefix;
-	sRange mRange1;
-	sRange mRange2;
-	BIGNUM* mDifficulty;
+    std::string mPrefix;
+    sRange mRange1;
+    sRange mRange2;
+    BIGNUM* mDifficulty;
 
-	sPrefix() {
-		mDifficulty = BN_new();
-	}
+    sPrefix() {
+        mDifficulty = BN_new();
+    }
 
-	~sPrefix() {
-		BN_free(mDifficulty);
-	}
+    ~sPrefix() {
+        BN_free(mDifficulty);
+    }
 
-	BIGNUM* Difficulty() {
-		BN_clear(mDifficulty);
+    BIGNUM* Difficulty() {
+        BN_clear(mDifficulty);
 
-		BN_add(mDifficulty, mDifficulty, mRange1.Difficulty());
-		BN_add(mDifficulty, mDifficulty, mRange2.Difficulty());
-		return mDifficulty;
-	}
+        BN_add(mDifficulty, mDifficulty, mRange1.Difficulty());
+        BN_add(mDifficulty, mDifficulty, mRange2.Difficulty());
+        return mDifficulty;
+    }
 };
 
 

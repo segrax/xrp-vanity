@@ -31,7 +31,7 @@ BN_CTX*  g_Ctx = BN_CTX_new();
 std::mutex  g_Lock;
 std::mutex  g_RandLock;
 std::atomic<std::uint64_t> g_Count;
-std::atomic<bool>		   g_FoundKey;
+std::atomic<bool>          g_FoundKey;
 std::vector<sPrefix*>      g_Prefixes;
 double g_Chance;
 
@@ -164,33 +164,33 @@ void findkey( const size_t pThreadID ) {
         // Account ID
         {
             SHA256(&WorkBuffer[0], 33, &WorkBuffer[0]);
-			RIPEMD160(&WorkBuffer[0], 32, &WorkBuffer[1]);
+            RIPEMD160(&WorkBuffer[0], 32, &WorkBuffer[1]);
 
             WorkBuffer[0] = TOKEN_ACCOUNT_ID;
             BN_bin2bn(&WorkBuffer[0], 25, bnAccountID);
 
-			// Check for prefix matches
-			for (auto& Range : g_Prefixes) {
+            // Check for prefix matches
+            for (auto& Range : g_Prefixes) {
 
-				// Is the accound id within range?
-				if (BN_cmp(Range->mRange1.mRangeLow, bnAccountID) <= 0) {
-					if (BN_cmp(Range->mRange1.mRangeHigh, bnAccountID) >= 0) {
-						
-						std::lock_guard<std::mutex> lock(g_Lock);
+                // Is the accound id within range?
+                if (BN_cmp(Range->mRange1.mRangeLow, bnAccountID) <= 0) {
+                    if (BN_cmp(Range->mRange1.mRangeHigh, bnAccountID) >= 0) {
+                        
+                        std::lock_guard<std::mutex> lock(g_Lock);
 
-						// Full AccountID
-						auto account = baseEncode(TOKEN_ACCOUNT_ID, &WorkBuffer[0], 21, Ctx);
+                        // Full AccountID
+                        auto account = baseEncode(TOKEN_ACCOUNT_ID, &WorkBuffer[0], 21, Ctx);
 
-						auto t = std::time(nullptr);
-						auto tm = *std::localtime(&t);
+                        auto t = std::time(nullptr);
+                        auto tm = *std::localtime(&t);
 
-						std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S] ");
-						std::cout << account << " => " << baseEncode(TOKEN_FAMILY_SEED, &SeedBuffer[0], 17, Ctx) << "\n";
+                        std::cout << std::put_time(&tm, "[%Y-%m-%d %H:%M:%S] ");
+                        std::cout << account << " => " << baseEncode(TOKEN_FAMILY_SEED, &SeedBuffer[0], 17, Ctx) << "\n";
 
-						g_FoundKey = true;
-					}
-				}
-			}
+                        g_FoundKey = true;
+                    }
+                }
+            }
         }
 
         ++g_Count;
@@ -203,11 +203,11 @@ void findkey( const size_t pThreadID ) {
 }
 
 int main(int pArgc, char *pArgv[]) {
-	std::vector<std::thread> workers;
+    std::vector<std::thread> workers;
 
-	auto start_time = std::chrono::high_resolution_clock::now();
+    auto start_time = std::chrono::high_resolution_clock::now();
 
-	g_Chance = 0;
+    g_Chance = 0;
 
     // Base 58 Encoding
     BN_set_word(g_Base, 58);
@@ -224,37 +224,37 @@ int main(int pArgc, char *pArgv[]) {
     // Get Parameters
     int MaxThreads = atoi(pArgv[1]);
 
-	// Some messages
-	std::cout << "xrp-vanity\n";
-	std::cout << "Search Threads: " << MaxThreads << "\n\n";
+    // Some messages
+    std::cout << "xrp-vanity\n";
+    std::cout << "Search Threads: " << MaxThreads << "\n\n";
 
-	for (int i = 2; i < pArgc; ++i) {
-		std::string PrefixPattern(pArgv[i]);
+    for (int i = 2; i < pArgc; ++i) {
+        std::string PrefixPattern(pArgv[i]);
 
-		// Ensure prefix starts with 'r'
-		if (PrefixPattern[0] != 'r')
-			PrefixPattern.insert(PrefixPattern.begin(), 'r');
+        // Ensure prefix starts with 'r'
+        if (PrefixPattern[0] != 'r')
+            PrefixPattern.insert(PrefixPattern.begin(), 'r');
 
-		// Calculate AccountID High/Low Range
-		auto Prefix = get_prefix_ranges(0, &PrefixPattern[0], g_Ctx);
-		if (!Prefix) {
-			return 0;
-		}
+        // Calculate AccountID High/Low Range
+        auto Prefix = get_prefix_ranges(0, &PrefixPattern[0], g_Ctx);
+        if (!Prefix) {
+            return 0;
+        }
 
-		g_Prefixes.push_back(Prefix);
-	}
+        g_Prefixes.push_back(Prefix);
+    }
 
     calculate_range_difficulty();
 
     // Launch Threads
-	workers.reserve(MaxThreads);
+    workers.reserve(MaxThreads);
 
     for (int i = 0; i < MaxThreads; i++)
         workers.emplace_back(findkey, i);
 
-	std::uint64_t TotalKeys = 0;
+    std::uint64_t TotalKeys = 0;
 
-	size_t SinceLast = 0;
+    size_t SinceLast = 0;
 
     // Keys per second count
     for( ;; ) {
@@ -262,10 +262,10 @@ int main(int pArgc, char *pArgv[]) {
 
         Sleep(1000);
 
-		if (g_FoundKey) {
-			g_FoundKey = false;
-			SinceLast = 0;
-		}
+        if (g_FoundKey) {
+            g_FoundKey = false;
+            SinceLast = 0;
+        }
 
         {
             std::lock_guard<std::mutex> lock(g_Lock);
@@ -275,11 +275,11 @@ int main(int pArgc, char *pArgv[]) {
 
             //std::cout << "[" << g_Count / elapsed_seconds << "/s]\r" << std::flush;
 
-			TotalKeys += g_Count;
-			SinceLast += g_Count;
-			vg_output_timing_console(SinceLast, g_Count, TotalKeys);
-			g_Count = 0;
-			
+            TotalKeys += g_Count;
+            SinceLast += g_Count;
+            vg_output_timing_console(SinceLast, g_Count, TotalKeys);
+            g_Count = 0;
+            
         }
     }
 
