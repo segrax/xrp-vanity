@@ -19,14 +19,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\Run\secp256k1.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-    </ClCompile>
     <ClCompile Include="..\Source\main.cpp" />
-    <ClCompile Include="..\Source\opencl.cpp" />
+    <ClCompile Include="..\Source\prefix.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\Source\prefix.hpp" />
     <ClInclude Include="..\Source\stdafx.hpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

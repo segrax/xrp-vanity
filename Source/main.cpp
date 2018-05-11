@@ -217,7 +217,7 @@ int main(int pArgc, char *pArgv[]) {
 
     if(pArgc < 3) {
         std::cout << "usage:   '" << pArgv[0] << " <Threads> <Prefix> <Prefix>...'\n";
-        std::cout << "\n" << pArgv[0] << " 4 rRob<\n\n";
+        std::cout << "\n" << pArgv[0] << " 4 rRob\n\n";
         exit(1);
     }
 
